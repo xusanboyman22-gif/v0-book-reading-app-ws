@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -11,6 +10,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Upload, X, BookPlus, FileText, ImageIcon, Loader2 } from "lucide-react"
 import Image from "next/image"
+
+// Import the service we created
+import { uploadToGithub } from "@/lib/github-service"
 
 interface AddBookFormProps {
   onClose: () => void
@@ -44,9 +46,7 @@ export function AddBookForm({ onClose, onBookAdded, categories }: AddBookFormPro
       }
       setCoverFile(file)
       const reader = new FileReader()
-      reader.onloadend = () => {
-        setCoverPreview(reader.result as string)
-      }
+      reader.onloadend = () => setCoverPreview(reader.result as string)
       reader.readAsDataURL(file)
       setError(null)
     }
@@ -82,77 +82,66 @@ export function AddBookForm({ onClose, onBookAdded, categories }: AddBookFormPro
     setIsSubmitting(true)
 
     try {
-      // Upload cover image if provided
-      let coverUrl = "/abstract-book-cover.png"
+      const bookId = `book-${Date.now()}`
+      
+      // 1. Upload Cover Image to GitHub (if exists)
+      let finalCoverUrl = "/abstract-book-cover.png"
       if (coverFile) {
-        const coverFormData = new FormData()
-        coverFormData.append("file", coverFile)
-        const coverResponse = await fetch("/api/upload", {
-          method: "POST",
-          body: coverFormData,
+        const coverPath = `library/${bookId}/cover-${coverFile.name}`
+        await uploadToGithub({
+          path: coverPath,
+          content: await coverFile.arrayBuffer(),
+          message: `Upload Cover: ${formData.title}`,
+          isBinary: true
         })
-        if (coverResponse.ok) {
-          const coverData = await coverResponse.json()
-          coverUrl = coverData.url
-        }
+        finalCoverUrl = `https://raw.githubusercontent.com/xusanboyman22-gif/v0-book-reading-app-ws/main/${coverPath}`
       }
 
-      // Upload PDF and parse it
-      const pdfFormData = new FormData()
-      pdfFormData.append("file", pdfFile)
-      const pdfResponse = await fetch("/api/upload", {
-        method: "POST",
-        body: pdfFormData,
+      // 2. Upload PDF to GitHub
+      const pdfPath = `library/${bookId}/${pdfFile.name}`
+      await uploadToGithub({
+        path: pdfPath,
+        content: await pdfFile.arrayBuffer(),
+        message: `Upload PDF: ${formData.title}`,
+        isBinary: true
       })
 
-      if (!pdfResponse.ok) {
-        throw new Error("PDF yuklashda xatolik")
-      }
+      const finalPdfUrl = `https://raw.githubusercontent.com/xusanboyman22-gif/v0-book-reading-app-ws/main/${pdfPath}`
 
-      const pdfData = await pdfResponse.json()
-
-      // Parse PDF content
-      const parseResponse = await fetch("/api/parse-pdf", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pdfUrl: pdfData.url }),
-      })
-
-      let content = "Bu kitobning matni yuklanmoqda..."
-      let pageCount = 1
-
-      if (parseResponse.ok) {
-        const parseData = await parseResponse.json()
-        content = parseData.content || content
-        pageCount = parseData.pageCount || 1
-      }
-
-      // Save book to localStorage (or could be API)
+      // 3. Create Book Data
       const newBook = {
-        id: `user-${Date.now()}`,
+        id: bookId,
         title: formData.title,
         author: formData.author,
-        cover: coverUrl,
+        cover: finalCoverUrl,
         description: formData.description,
         category: formData.category,
-        pages: pageCount,
+        pages: 0,
         year: formData.year,
         language: formData.language,
-        content: content,
-        pdfUrl: pdfData.url,
+        content: "Matn yuklanmoqda...",
+        pdfUrl: finalPdfUrl,
         isUserCreated: true,
         createdAt: new Date().toISOString(),
       }
 
-      // Save to localStorage
-      const existingBooks = JSON.parse(localStorage.getItem("kitobxon_user_books") || "[]")
-      existingBooks.push(newBook)
-      localStorage.setItem("kitobxon_user_books", JSON.stringify(existingBooks))
+      // 4. Save Metadata.json to GitHub
+      await uploadToGithub({
+        path: `library/${bookId}/metadata.json`,
+        content: JSON.stringify(newBook, null, 2),
+        message: `Add Metadata: ${formData.title}`
+      })
 
+      // Sync with local state for immediate feedback
+      const localBooks = JSON.parse(localStorage.getItem("kitobxon_user_books") || "[]")
+      localBooks.push(newBook)
+      localStorage.setItem("kitobxon_user_books", JSON.stringify(localBooks))
+
+      alert("Kitob muvaffaqiyatli saqlandi!")
       onBookAdded()
       onClose()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Xatolik yuz berdi")
+    } catch (err: any) {
+      setError(err.message || "Xatolik yuz berdi")
     } finally {
       setIsSubmitting(false)
     }
@@ -165,14 +154,11 @@ export function AddBookForm({ onClose, onBookAdded, categories }: AddBookFormPro
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="flex items-center gap-2">
-                <BookPlus className="h-5 w-5" />
-                Yangi kitob qo'shish
+                <BookPlus className="h-5 w-5" /> Yangi kitob qo'shish
               </CardTitle>
-              <CardDescription>PDF fayl va ma'lumotlarni kiriting</CardDescription>
+              <CardDescription>Ma'lumotlar to'g'ridan-to'g'ri GitHub repositoryga saqlanadi</CardDescription>
             </div>
-            <Button variant="ghost" size="icon" onClick={onClose}>
-              <X className="h-5 w-5" />
-            </Button>
+            <Button variant="ghost" size="icon" onClick={onClose}><X className="h-5 w-5" /></Button>
           </div>
         </CardHeader>
         <CardContent className="p-6">
@@ -183,201 +169,60 @@ export function AddBookForm({ onClose, onBookAdded, categories }: AddBookFormPro
               </div>
             )}
 
-            {/* Cover Image and PDF Upload */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-              {/* Cover Image */}
               <div>
                 <Label className="mb-2 block">Muqova rasmi</Label>
                 <div className="relative">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleCoverChange}
-                    className="hidden"
-                    id="cover-upload"
-                  />
-                  <label
-                    htmlFor="cover-upload"
-                    className="flex flex-col items-center justify-center w-full h-48 border-2 border-dashed border-border rounded-lg cursor-pointer hover:border-primary/50 hover:bg-muted/50 transition-colors overflow-hidden"
-                  >
+                  <input type="file" accept="image/*" onChange={handleCoverChange} className="hidden" id="cover-upload" />
+                  <label htmlFor="cover-upload" className="flex flex-col items-center justify-center w-full h-48 border-2 border-dashed border-border rounded-lg cursor-pointer hover:bg-muted/50 overflow-hidden">
                     {coverPreview ? (
-                      <Image
-                        src={coverPreview || "/placeholder.svg"}
-                        alt="Cover preview"
-                        fill
-                        className="object-cover"
-                      />
+                      <Image src={coverPreview} alt="Preview" fill className="object-cover" />
                     ) : (
-                      <>
-                        <ImageIcon className="h-10 w-10 text-muted-foreground mb-2" />
-                        <span className="text-sm text-muted-foreground">Rasm yuklash</span>
-                      </>
+                      <><ImageIcon className="h-10 w-10 text-muted-foreground mb-2" /><span className="text-sm">Rasm yuklash</span></>
                     )}
                   </label>
-                  {coverPreview && (
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      size="icon"
-                      className="absolute top-2 right-2 h-8 w-8"
-                      onClick={() => {
-                        setCoverPreview(null)
-                        setCoverFile(null)
-                      }}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  )}
                 </div>
               </div>
 
-              {/* PDF Upload */}
               <div>
                 <Label className="mb-2 block">PDF fayl *</Label>
                 <div className="relative">
                   <input type="file" accept=".pdf" onChange={handlePdfChange} className="hidden" id="pdf-upload" />
-                  <label
-                    htmlFor="pdf-upload"
-                    className="flex flex-col items-center justify-center w-full h-48 border-2 border-dashed border-border rounded-lg cursor-pointer hover:border-primary/50 hover:bg-muted/50 transition-colors"
-                  >
+                  <label htmlFor="pdf-upload" className="flex flex-col items-center justify-center w-full h-48 border-2 border-dashed border-border rounded-lg cursor-pointer hover:bg-muted/50">
                     {pdfName ? (
-                      <div className="flex flex-col items-center gap-2 p-4">
-                        <FileText className="h-10 w-10 text-primary" />
-                        <span className="text-sm text-center text-foreground font-medium break-all px-2">
-                          {pdfName}
-                        </span>
-                        <span className="text-xs text-muted-foreground">PDF yuklangan</span>
-                      </div>
+                      <div className="flex flex-col items-center gap-2"><FileText className="h-10 w-10 text-primary" /><span className="text-sm font-medium">{pdfName}</span></div>
                     ) : (
-                      <>
-                        <Upload className="h-10 w-10 text-muted-foreground mb-2" />
-                        <span className="text-sm text-muted-foreground">PDF yuklash</span>
-                      </>
+                      <><Upload className="h-10 w-10 text-muted-foreground mb-2" /><span className="text-sm">PDF yuklash</span></>
                     )}
                   </label>
-                  {pdfName && (
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      size="icon"
-                      className="absolute top-2 right-2 h-8 w-8"
-                      onClick={() => {
-                        setPdfFile(null)
-                        setPdfName("")
-                      }}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  )}
                 </div>
               </div>
             </div>
 
-            {/* Book Details */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="sm:col-span-2">
                 <Label htmlFor="title">Kitob nomi *</Label>
-                <Input
-                  id="title"
-                  value={formData.title}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  placeholder="Masalan: O'tkan kunlar"
-                  required
-                />
+                <Input id="title" value={formData.title} onChange={(e) => setFormData({ ...formData, title: e.target.value })} required />
               </div>
-
               <div>
                 <Label htmlFor="author">Muallif *</Label>
-                <Input
-                  id="author"
-                  value={formData.author}
-                  onChange={(e) => setFormData({ ...formData, author: e.target.value })}
-                  placeholder="Masalan: Abdulla Qodiriy"
-                  required
-                />
+                <Input id="author" value={formData.author} onChange={(e) => setFormData({ ...formData, author: e.target.value })} required />
               </div>
-
               <div>
                 <Label htmlFor="category">Kategoriya *</Label>
-                <Select
-                  value={formData.category}
-                  onValueChange={(value) => setFormData({ ...formData, category: value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Kategoriya tanlang" />
-                  </SelectTrigger>
+                <Select value={formData.category} onValueChange={(val) => setFormData({ ...formData, category: val })}>
+                  <SelectTrigger><SelectValue placeholder="Tanlang" /></SelectTrigger>
                   <SelectContent>
-                    {categories
-                      .filter((c) => c !== "Barchasi")
-                      .map((category) => (
-                        <SelectItem key={category} value={category}>
-                          {category}
-                        </SelectItem>
-                      ))}
+                    {categories.filter(c => c !== "Barchasi").map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                   </SelectContent>
                 </Select>
-              </div>
-
-              <div>
-                <Label htmlFor="year">Yil</Label>
-                <Input
-                  id="year"
-                  type="number"
-                  value={formData.year}
-                  onChange={(e) =>
-                    setFormData({ ...formData, year: Number.parseInt(e.target.value) || new Date().getFullYear() })
-                  }
-                  min={1000}
-                  max={new Date().getFullYear()}
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="language">Til</Label>
-                <Select
-                  value={formData.language}
-                  onValueChange={(value) => setFormData({ ...formData, language: value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Til tanlang" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="O'zbek">O'zbek</SelectItem>
-                    <SelectItem value="Rus">Rus</SelectItem>
-                    <SelectItem value="Ingliz">Ingliz</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="sm:col-span-2">
-                <Label htmlFor="description">Tavsif</Label>
-                <Textarea
-                  id="description"
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  placeholder="Kitob haqida qisqacha ma'lumot..."
-                  rows={3}
-                />
               </div>
             </div>
 
-            {/* Submit Buttons */}
             <div className="flex justify-end gap-3 pt-4 border-t">
-              <Button type="button" variant="outline" onClick={onClose}>
-                Bekor qilish
-              </Button>
+              <Button type="button" variant="outline" onClick={onClose}>Bekor qilish</Button>
               <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Yuklanmoqda...
-                  </>
-                ) : (
-                  <>
-                    <BookPlus className="mr-2 h-4 w-4" />
-                    Kitob qo'shish
-                  </>
-                )}
+                {isSubmitting ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Saqlanmoqda...</> : <><BookPlus className="mr-2 h-4 w-4" /> Saqlash</>}
               </Button>
             </div>
           </form>
