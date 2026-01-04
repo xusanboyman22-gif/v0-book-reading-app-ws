@@ -1,9 +1,9 @@
 // lib/github-service.ts
 
-// These should be in your .env.local file, but can be hardcoded for testing if needed
-const GITHUB_TOKEN = process.env.NEXT_PUBLIC_GITHUB_TOKEN; 
-const GITHUB_OWNER = process.env.NEXT_PUBLIC_GITHUB_OWNER || "xusanboyman22-gif";
-const GITHUB_REPO = process.env.NEXT_PUBLIC_GITHUB_REPO || "v0-book-reading-app";
+// HARDCODED CONFIGURATION
+const GITHUB_TOKEN = "ghp_YOUR_GITHUB_TOKEN_HERE"; // Paste your token here
+const GITHUB_OWNER = "xusanboyman22-gif";
+const GITHUB_REPO = "v0-book-reading-app-ws";
 const BRANCH = "main";
 
 export interface GithubFileParams {
@@ -24,17 +24,14 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 }
 
 function utf8_to_b64(str: string): string {
+  // Handles special characters in title/author names
   return btoa(unescape(encodeURIComponent(str)));
 }
 
 export async function uploadToGithub({ path, content, message, isBinary = false }: GithubFileParams) {
-  if (!GITHUB_TOKEN) {
-    throw new Error("GitHub Token is missing. Please add NEXT_PUBLIC_GITHUB_TOKEN to your .env.local file.");
-  }
-
   const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${path}`;
 
-  // 1. Check if file exists (to get SHA for update)
+  // 1. Check if file exists to get SHA
   let sha: string | undefined;
   try {
     const existing = await fetch(url, {
@@ -50,7 +47,7 @@ export async function uploadToGithub({ path, content, message, isBinary = false 
       sha = data.sha;
     }
   } catch (e) {
-    console.log("File checking error (might be new file):", e);
+    console.log("New file detection...");
   }
 
   // 2. Prepare content
@@ -61,7 +58,7 @@ export async function uploadToGithub({ path, content, message, isBinary = false 
     contentBase64 = utf8_to_b64(content);
   }
 
-  // 3. Upload
+  // 3. PUT Request to GitHub
   const response = await fetch(url, {
     method: "PUT",
     headers: {
@@ -72,13 +69,13 @@ export async function uploadToGithub({ path, content, message, isBinary = false 
       message,
       content: contentBase64,
       branch: BRANCH,
-      sha // Include SHA if updating existing file
+      sha 
     }),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`GitHub Error: ${errorText}`);
+    throw new Error(`GitHub Upload Error: ${errorText}`);
   }
 
   return await response.json();
