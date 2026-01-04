@@ -58,6 +58,46 @@ export async function uploadToGithub({ path, content, message, isBinary = false 
     contentBase64 = utf8_to_b64(content);
   }
 
+
+  export async function fetchAllBooks() {
+  const GITHUB_OWNER = "xusanboyman22-gif";
+  const GITHUB_REPO = "v0-book-reading-app-ws";
+  // No token strictly needed for GET on public repos, but using it avoids rate limits
+  const token = process.env.NEXT_PUBLIC_GITHUB_TOKEN;
+
+  try {
+    // 1. Get the list of folders in 'library/'
+    const res = await fetch(
+      `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/library`,
+      {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        cache: 'no-store'
+      }
+    );
+
+    if (!res.ok) return [];
+
+    const folders = await res.json();
+    const books = [];
+
+    // 2. For each folder, grab the metadata.json
+    for (const folder of folders) {
+      if (folder.type === 'dir') {
+        const metaRes = await fetch(
+          `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/main/library/${folder.name}/metadata.json`
+        );
+        if (metaRes.ok) {
+          const metaData = await metaRes.json();
+          books.push(metaData);
+        }
+      }
+    }
+    return books;
+  } catch (error) {
+    console.error("Error fetching books:", error);
+    return [];
+  }
+}
   // 3. PUT Request to GitHub
   const response = await fetch(url, {
     method: "PUT",
