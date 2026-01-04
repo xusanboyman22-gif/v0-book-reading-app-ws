@@ -28,27 +28,47 @@ function utf8_to_b64(str: string): string {
   return btoa(unescape(encodeURIComponent(str)));
 }
 
-export async function uploadToGithub({ path, content, message, isBinary = false }: GithubFileParams) {
-  const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${path}`;
 
-  // 1. Check if file exists to get SHA
-  let sha: string | undefined;
-  try {
-    const existing = await fetch(url, {
-      headers: { 
-        Authorization: `Bearer ${GITHUB_TOKEN}`,
-        "Accept": "application/vnd.github.v3+json"
-      },
-      cache: "no-store"
-    });
-    
-    if (existing.ok) {
-      const data = await existing.json();
-      sha = data.sha;
-    }
-  } catch (e) {
-    console.log("New file detection...");
+export async function uploadToGithub({ path, content, message, isBinary = false }: any) {
+  if (!GITHUB_TOKEN) {
+    throw new Error("GitHub Token topilmadi. .env.local faylini tekshiring.");
   }
+
+  // Convert content to Base64 for GitHub API
+  let base64Content = "";
+  if (isBinary) {
+    const bytes = new Uint8Array(content);
+    let binary = "";
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    base64Content = btoa(binary);
+  } else {
+    base64Content = btoa(unescape(encodeURIComponent(content)));
+  }
+
+  const response = await fetch(
+    `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${path}`,
+    {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${GITHUB_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        message,
+        content: base64Content,
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.message || "GitHub-ga yuklashda xatolik yuz berdi");
+  }
+
+  return await response.json();
+}
 
   // 2. Prepare content
   let contentBase64 = "";
