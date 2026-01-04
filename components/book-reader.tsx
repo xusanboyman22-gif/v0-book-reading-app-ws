@@ -18,6 +18,8 @@ import {
   Sparkles,
   ChevronLeft,
   ChevronRight,
+  FileText,
+  ExternalLink
 } from "lucide-react"
 import Image from "next/image"
 import { Input } from "@/components/ui/input"
@@ -30,6 +32,8 @@ interface BookReaderProps {
 }
 
 export function BookReader({ book, onClose, onAskAI }: BookReaderProps) {
+  // Ko'rish rejimi: 'text' (AI va matn) yoki 'pdf' (Asl fayl)
+  const [viewMode, setViewMode] = useState<"text" | "pdf">("text")
   const [fontSize, setFontSize] = useState(18)
   const [isReading, setIsReading] = useState(false)
   const [selectedText, setSelectedText] = useState("")
@@ -42,20 +46,23 @@ export function BookReader({ book, onClose, onAskAI }: BookReaderProps) {
   const contentRef = useRef<HTMLDivElement>(null)
   const speechRef = useRef<SpeechSynthesisUtterance | null>(null)
 
-  const pages = useMemo(() => splitContentIntoPages(book.content), [book.content])
+  // Matnli kontentni sahifalarga bo'lish
+  const pages = useMemo(() => {
+    const content = book.content || "Matn mavjud emas";
+    return splitContentIntoPages(content);
+  }, [book.content])
+  
   const totalPages = pages.length
 
   useEffect(() => {
-    return () => {
-      if (speechRef.current) {
-        window.speechSynthesis.cancel()
-      }
+    // Agar matn bo'sh bo'lsa, avtomatik PDF rejimiga o'tish
+    if (!book.content || book.content === "Matn yuklanmoqda...") {
+      setViewMode("pdf")
     }
-  }, [])
-
-  useEffect(() => {
-    setCurrentPage(1)
-  }, [book.id])
+    return () => {
+      if (speechRef.current) window.speechSynthesis.cancel()
+    }
+  }, [book.id, book.content])
 
   const handleTextToSpeech = () => {
     if (isReading) {
@@ -97,259 +104,167 @@ export function BookReader({ book, onClose, onAskAI }: BookReaderProps) {
     }
   }
 
-  const goToPage = (page: number) => {
-    if (page >= 1 && page <= totalPages) {
-      setCurrentPage(page)
-      window.speechSynthesis.cancel()
-      setIsReading(false)
-      setShowPageInput(false)
-      contentRef.current?.scrollTo(0, 0)
-    }
-  }
-
-  const handlePageInputSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    const page = Number.parseInt(pageInputValue)
-    if (!isNaN(page)) {
-      goToPage(page)
-    }
-    setPageInputValue("")
-  }
-
   const explainText = async () => {
     if (!selectedText) return
     setShowExplanation(true)
     setIsLoadingExplanation(true)
-
     try {
       const response = await fetch("/api/explain", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: selectedText, bookTitle: book.title }),
       })
-
       if (response.ok) {
         const data = await response.json()
         setExplanation(data.explanation)
-      } else {
-        setExplanation("Tushuntirish yuklanmadi. Iltimos, qaytadan urinib ko'ring.")
       }
     } catch {
-      setExplanation("Xatolik yuz berdi. Internet aloqasini tekshiring.")
+      setExplanation("Xatolik yuz berdi.")
     }
-
     setIsLoadingExplanation(false)
-  }
-
-  const askAboutSelection = () => {
-    if (selectedText) {
-      onAskAI(`"${selectedText}" - bu matn nimani anglatadi?`, book.content)
-    }
   }
 
   return (
     <div className="fixed inset-0 z-50 bg-background overflow-hidden flex flex-col">
-      {/* Header */}
-      <div className="flex-shrink-0 border-b border-border bg-background/95 backdrop-blur">
-        <div className="container mx-auto px-4 py-3">
-          <div className="flex items-center justify-between gap-4">
+      {/* Navigation Header */}
+      <div className="flex-shrink-0 border-b bg-background/95 backdrop-blur z-10">
+        <div className="container mx-auto px-4 py-3 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
             <Button variant="ghost" size="sm" onClick={onClose}>
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Orqaga
+              <ArrowLeft className="mr-2 h-4 w-4" /> Orqaga
             </Button>
-
-            <div className="flex items-center gap-2">
-              {/* Font Size Controls */}
-              <div className="hidden sm:flex items-center gap-2 rounded-lg border border-border px-3 py-1">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={() => setFontSize(Math.max(14, fontSize - 2))}
-                >
-                  <Minus className="h-4 w-4" />
-                </Button>
-                <span className="text-sm w-8 text-center">{fontSize}</span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={() => setFontSize(Math.min(28, fontSize + 2))}
-                >
-                  <Plus className="h-4 w-4" />
-                </Button>
-              </div>
-
-              {/* Text to Speech */}
-              <Button variant={isReading ? "default" : "outline"} size="sm" onClick={handleTextToSpeech}>
-                {isReading ? (
-                  <>
-                    <Pause className="mr-2 h-4 w-4" />
-                    <span className="hidden sm:inline">To'xtatish</span>
-                  </>
-                ) : (
-                  <>
-                    <Volume2 className="mr-2 h-4 w-4" />
-                    <span className="hidden sm:inline">O'qitish</span>
-                  </>
-                )}
+            
+            {/* VIEW MODE SWITCHER */}
+            <div className="flex bg-muted rounded-lg p-1 shadow-inner">
+              <Button 
+                variant={viewMode === "text" ? "secondary" : "ghost"} 
+                size="sm" 
+                className="h-8 px-4"
+                onClick={() => setViewMode("text")}
+              >
+                <BookOpen className="h-4 w-4 mr-2" /> Matn
               </Button>
-
-              <Button variant="ghost" size="icon" onClick={onClose}>
-                <X className="h-5 w-5" />
+              <Button 
+                variant={viewMode === "pdf" ? "secondary" : "ghost"} 
+                size="sm" 
+                className="h-8 px-4"
+                onClick={() => setViewMode("pdf")}
+              >
+                <FileText className="h-4 w-4 mr-2" /> PDF
               </Button>
             </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {viewMode === "text" && (
+              <>
+                <div className="hidden sm:flex items-center gap-1 border rounded-md px-2">
+                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setFontSize(Math.max(12, fontSize - 2))}>
+                    <Minus className="h-4 w-4" />
+                  </Button>
+                  <span className="text-xs font-mono w-6 text-center">{fontSize}</span>
+                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setFontSize(Math.min(32, fontSize + 2))}>
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </div>
+                <Button variant={isReading ? "default" : "outline"} size="icon" className="h-9 w-9" onClick={handleTextToSpeech}>
+                  {isReading ? <Pause className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+                </Button>
+              </>
+            )}
+            <Button variant="ghost" size="icon" onClick={onClose}>
+              <X className="h-5 w-5" />
+            </Button>
           </div>
         </div>
       </div>
 
-      {/* Main Content Area */}
-      <div className="flex-1 overflow-auto" ref={contentRef}>
-        <div className="container mx-auto px-4 py-8">
-          <div className="mx-auto max-w-3xl">
-            {/* Book Info Header - Only show on first page */}
-            {currentPage === 1 && (
-              <div className="mb-8 flex flex-col sm:flex-row gap-6">
-                <div className="relative h-48 w-32 flex-shrink-0 overflow-hidden rounded-lg mx-auto sm:mx-0">
-                  <Image src={book.cover || "/placeholder.svg"} alt={book.title} fill className="object-cover" />
-                </div>
-                <div className="text-center sm:text-left">
-                  <Badge variant="secondary" className="mb-2">
-                    {book.category}
-                  </Badge>
-                  <h1 className="mb-2 text-2xl font-bold text-foreground">{book.title}</h1>
-                  <p className="mb-2 text-lg text-muted-foreground">{book.author}</p>
-                  <p className="text-sm text-muted-foreground">{book.description}</p>
-                  <div className="mt-4 flex flex-wrap justify-center sm:justify-start gap-4 text-sm text-muted-foreground">
-                    <span className="flex items-center gap-1">
-                      <BookOpen className="h-4 w-4" />
-                      {totalPages} sahifa
-                    </span>
-                    <span>{book.year} yil</span>
-                    <span>{book.language}</span>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Selected Text Actions */}
-            {selectedText && (
-              <Card className="mb-6 border-primary/50 bg-primary/5">
-                <CardContent className="p-4">
-                  <p className="mb-3 text-sm italic text-muted-foreground">
-                    "{selectedText.length > 100 ? selectedText.slice(0, 100) + "..." : selectedText}"
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    <Button size="sm" variant="outline" onClick={explainText}>
-                      <Sparkles className="mr-2 h-4 w-4" />
-                      Tushuntirish
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={askAboutSelection}>
-                      <MessageCircle className="mr-2 h-4 w-4" />
-                      AI dan so'rash
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setSelectedText("")}>
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Explanation Popup */}
-            {showExplanation && (
-              <Card className="mb-6 border-accent/50 bg-accent/5">
-                <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-lg flex items-center gap-2">
-                      <Sparkles className="h-5 w-5 text-accent" />
-                      Tushuntirish
-                    </CardTitle>
-                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowExplanation(false)}>
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  {isLoadingExplanation ? (
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-accent border-t-transparent" />
-                      Tushuntirilmoqda...
+      {/* Content Area */}
+      <div className="flex-1 overflow-y-auto bg-muted/20" ref={contentRef}>
+        <div className="container mx-auto px-4 py-6 h-full">
+          <div className="max-w-4xl mx-auto h-full">
+            
+            {viewMode === "text" ? (
+              /* --- TEXT READING MODE --- */
+              <div className="space-y-6">
+                {currentPage === 1 && (
+                  <div className="bg-background border rounded-xl p-6 flex flex-col md:flex-row gap-6 shadow-sm">
+                    <div className="relative h-56 w-40 flex-shrink-0 shadow-md rounded-lg overflow-hidden">
+                      <Image src={book.cover || "/placeholder.svg"} alt={book.title} fill className="object-cover" />
                     </div>
-                  ) : (
-                    <p className="text-foreground leading-relaxed">{explanation}</p>
-                  )}
-                </CardContent>
-              </Card>
-            )}
+                    <div>
+                      <Badge className="mb-2">{book.category}</Badge>
+                      <h1 className="text-3xl font-bold">{book.title}</h1>
+                      <p className="text-xl text-muted-foreground">{book.author}</p>
+                      <p className="mt-4 text-muted-foreground leading-relaxed">{book.description}</p>
+                    </div>
+                  </div>
+                )}
 
-            {/* Book Content - Current Page */}
-            <Card className="min-h-[60vh]">
-              <CardContent className="p-6 sm:p-8">
-                <div
-                  className="prose prose-lg max-w-none text-foreground leading-relaxed"
-                  style={{ fontSize: `${fontSize}px` }}
-                  onMouseUp={handleTextSelection}
-                >
-                  {pages[currentPage - 1].split("\n\n").map((paragraph, index) => (
-                    <p key={index} className="mb-4">
-                      {paragraph}
-                    </p>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      </div>
+                {selectedText && (
+                  <Card className="border-primary/40 bg-primary/5 animate-in fade-in slide-in-from-top-2">
+                    <CardContent className="p-4 flex items-center justify-between gap-4">
+                      <p className="text-sm italic truncate">"{selectedText}"</p>
+                      <div className="flex gap-2 flex-shrink-0">
+                        <Button size="sm" onClick={explainText}><Sparkles className="h-3.5 w-3.5 mr-1"/> AI Tushuntir</Button>
+                        <Button size="sm" variant="ghost" onClick={() => setSelectedText("")}><X className="h-4 w-4"/></Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
 
-      {/* Page Navigation Footer */}
-      <div className="flex-shrink-0 border-t border-border bg-background/95 backdrop-blur">
-        <div className="container mx-auto px-4 py-3">
-          <div className="flex items-center justify-between max-w-3xl mx-auto">
-            <Button variant="outline" size="sm" onClick={goToPrevPage} disabled={currentPage === 1}>
-              <ChevronLeft className="mr-1 h-4 w-4" />
-              Oldingi
-            </Button>
-
-            <div className="flex items-center gap-2">
-              {showPageInput ? (
-                <form onSubmit={handlePageInputSubmit} className="flex items-center gap-2">
-                  <Input
-                    type="number"
-                    min={1}
-                    max={totalPages}
-                    value={pageInputValue}
-                    onChange={(e) => setPageInputValue(e.target.value)}
-                    placeholder={String(currentPage)}
-                    className="w-16 h-8 text-center"
-                    autoFocus
+                <Card className="min-h-[60vh] shadow-sm mb-10">
+                  <CardContent className="p-8 md:p-12">
+                    <div 
+                      className="prose prose-slate max-w-none break-words" 
+                      style={{ fontSize: `${fontSize}px`, lineHeight: '1.8' }}
+                      onMouseUp={handleTextSelection}
+                    >
+                      {pages[currentPage - 1]?.split("\n\n").map((para, i) => (
+                        <p key={i} className="mb-6">{para}</p>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            ) : (
+              /* --- PDF VIEW MODE --- */
+              <div className="w-full h-[82vh] bg-background border rounded-xl overflow-hidden shadow-xl flex flex-col">
+                {book.pdfUrl ? (
+                  <iframe 
+                    src={`${book.pdfUrl}#toolbar=0&navpanes=0`} 
+                    className="w-full h-full border-none"
+                    title={book.title}
                   />
-                  <span className="text-muted-foreground">/ {totalPages}</span>
-                  <Button type="submit" size="sm" variant="ghost">
-                    O'tish
-                  </Button>
-                  <Button type="button" size="sm" variant="ghost" onClick={() => setShowPageInput(false)}>
-                    <X className="h-4 w-4" />
-                  </Button>
-                </form>
-              ) : (
-                <button
-                  onClick={() => setShowPageInput(true)}
-                  className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <span className="font-medium text-foreground">{currentPage}</span> / {totalPages} sahifa
-                </button>
-              )}
-            </div>
-
-            <Button variant="outline" size="sm" onClick={goToNextPage} disabled={currentPage === totalPages}>
-              Keyingi
-              <ChevronRight className="ml-1 h-4 w-4" />
-            </Button>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full gap-4 p-10 text-center">
+                    <FileText className="h-16 w-16 text-muted-foreground" />
+                    <h3 className="text-xl font-semibold">PDF fayl topilmadi</h3>
+                    <p className="text-muted-foreground">Ushbu kitobning PDF varianti yuklanmagan yoki manzil noto'g'ri.</p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Pagination (Only for Text Mode) */}
+      {viewMode === "text" && (
+        <div className="flex-shrink-0 border-t bg-background/95 backdrop-blur py-3">
+          <div className="container mx-auto px-4 flex items-center justify-between max-w-lg">
+            <Button variant="outline" size="sm" onClick={goToPrevPage} disabled={currentPage === 1}>
+              <ChevronLeft className="h-4 w-4 mr-1" /> Oldingi
+            </Button>
+            <div className="text-sm font-medium">
+              {currentPage} / {totalPages}
+            </div>
+            <Button variant="outline" size="sm" onClick={goToNextPage} disabled={currentPage === totalPages}>
+              Keyingi <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
