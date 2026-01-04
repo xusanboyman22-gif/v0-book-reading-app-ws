@@ -1,7 +1,7 @@
 // lib/github-service.ts
 
 // HARDCODED CONFIGURATION
-const GITHUB_TOKEN = "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"; // Paste your token here
+const GITHUB_TOKEN = process.env.NEXT_PUBLIC_GITHUB_TOKEN;
 const GITHUB_OWNER = "xusanboyman22-gif";
 const GITHUB_REPO = "v0-book-reading-app-ws";
 const BRANCH = "main";
